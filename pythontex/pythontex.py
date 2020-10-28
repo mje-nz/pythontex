@@ -606,9 +606,9 @@ def modified_dependencies(key, data, old_data, temp_data):
                 # would require an unnecessary decoding and encoding cycle.
                 f = open(dep_file, 'rb')
                 hasher = sha1()
-                h = hasher(f.read()).hexdigest()
+                hasher.update(f.read())
                 f.close()
-                if h != old_dep_hash_dict[dep][1]:
+                if hasher.hexdigest() != old_dep_hash_dict[dep][1]:
                     return True
             else:
                 mtime = os.path.getmtime(dep_file)

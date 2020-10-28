@@ -152,6 +152,7 @@ def test_dependency(in_temp_dir, use_hash):
 
 @pytest.mark.parametrize("use_hash", (False, True))
 def test_rebuild_dependency(in_temp_dir, use_hash):
+    """Test rebuilding an example which reads from an external file."""
     Path("data.txt").write_text("hello")
     Path("test.tex").write_text(
         document(r"\py{pytex.open('data.txt').read()}", options="depythontex")
