@@ -87,12 +87,6 @@ __version__ = '0.18dev'
 # It is created here simply for reference
 listing = None  #'verbatim', 'fancyvrb', 'listings', 'minted', 'pythontex'
 
-# List of things to add to the preamble
-# It can be appended to via the command-line option --preamble
-# It is also appended to based on the code listing style that is used
-# And it could be manually edited here as well, as long as it remains a list
-preamble_additions = list()
-
 # Lexer dict
 # If you are using Pygments lexers that don't directly correspond to the
 # languages used by the listings package, you can submit replacements via the
@@ -275,8 +269,10 @@ def replace_code_env(name, arglist, linenum, code_replacement,
             else:
                 pre = '\\begin{{pygments}}[numbers=left,firstnumber={0}]{{{1}}}'.format(firstnumber, lexer)
         post = '\\end{pygments}'
+    else:
+        raise ValueError("Unknown listing environment " + str(listing))
     code_replacement = pre + code_replacement + post
-    return (code_replacement, after)
+    return code_replacement, after
 
 
 # We will need to issue a warning every time that a substitution of printed
@@ -659,613 +655,583 @@ def replace_print_env(name, arglist, linenum,
     return (print_replacement, after)
 
 
+def parse_argv(argv):
+    """Parse depythontex command-line arguments."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--version', action='version',
+                        version='DePythonTeX {0}'.format(__version__))
+    parser.add_argument('--encoding', default='utf-8',
+                        help='encoding for all text files (see codecs module for encodings)')
+    parser.add_argument('--overwrite', default=False, action='store_true',
+                        help='overwrite existing output, if it exists (off by default)')
+    parser.add_argument('--listing', default='verbatim',
+                        choices=('verbatim', 'fancyvrb', 'listings', 'minted', 'pythontex'),
+                        help='style or package used for typesetting code')
+    parser.add_argument('--lexer-dict', default=None,
+                        help='add mappings from Pygments lexer names to the language names of other highlighting packages; should be a comma-separated list of the form "<Pygments lexer>:<language>, <Pygments lexer>:<language>, ..."')
+    parser.add_argument('--preamble', default=None,
+                        help='line of commands to add to output preamble')
+    parser.add_argument('--graphicspath', default=False, action='store_true',
+                        help=r'Add the outputdir to the graphics path, by modifying an existing \graphicspath command or adding one.')
+    parser.add_argument('-o', '--output', default=None,
+                        help='output file')
+    parser.add_argument('TEXNAME',
+                        help='LaTeX file')
+    return parser.parse_args(argv)
 
 
-# Deal with argv
-# Parse argv
-parser = argparse.ArgumentParser()
-parser.add_argument('--version', action='version',
-                    version='DePythonTeX {0}'.format(__version__))
-parser.add_argument('--encoding', default='utf-8',
-                    help='encoding for all text files (see codecs module for encodings)')
-parser.add_argument('--overwrite', default=False, action='store_true',
-                    help='overwrite existing output, if it exists (off by default)')
-parser.add_argument('--listing', default='verbatim',
-                    choices=('verbatim', 'fancyvrb', 'listings', 'minted', 'pythontex'),
-                    help='style or package used for typesetting code')
-parser.add_argument('--lexer-dict', default=None,
-                    help='add mappings from Pygments lexer names to the language names of other highlighting packages; should be a comma-separated list of the form "<Pygments lexer>:<language>, <Pygments lexer>:<language>, ..."')
-parser.add_argument('--preamble', default=None,
-                    help='line of commands to add to output preamble')
-parser.add_argument('--graphicspath', default=False, action='store_true',
-                    help=r'Add the outputdir to the graphics path, by modifying an existing \graphicspath command or adding one.')
-parser.add_argument('-o', '--output', default=None,
-                    help='output file')
-parser.add_argument('TEXNAME',
-                    help='LaTeX file')
-args = parser.parse_args()
+def collect_preamble_additions(args):
+    """Collect the list of things to add to the preamble.
 
-# Process argv
-encoding = args.encoding
-listing = args.listing
-if args.preamble is not None:
-    preamble_additions.append(args.preamble)
-if args.lexer_dict is not None:
-    args.lexer_dict = args.lexer_dict.replace(' ', '').replace("'", "").replace('"','').strip('{}')
-    for entry in args.lexer_dict.split(','):
-        k, v = entry.split(':')
-        lexer_dict[k] = v
-if args.listing == 'verbatim':
-    # In some contexts, the verbatim package might be desirable.
-    # But we assume that the user wants minimal packages.
-    # Also, the default verbatim environment doesn't allow text to follow the
-    # end-of-environment command.
-    # If the verbatim package is ever desired, simply uncomment the following:
-    # preamble_additions.append('\\usepackage{verbatim}')
-    pass
-elif args.listing == 'fancyvrb':
-    preamble_additions.append('\\usepackage{fancyvrb}')
-elif args.listing == 'listings':
-    preamble_additions.append('\\usepackage{listings}')
-elif args.listing == 'minted':
-    preamble_additions.append('\\usepackage{minted}')
-elif args.listing == 'pythontex':
-    preamble_additions.append('\\usepackage{pythontex}')
-
-
-
-
-# Let the user know things have started
-if args.output is not None:
-    print('This is DePythonTeX {0}'.format(__version__))
-    sys.stdout.flush()
+    It can be appended to via the command-line option --preamble.
+    It is also appended to based on the code listing style that is used.
+    """
+    preamble_additions = []
+    if args.preamble is not None:
+        preamble_additions.append(args.preamble)
+    if args.listing == 'verbatim':
+        # In some contexts, the verbatim package might be desirable.
+        # But we assume that the user wants minimal packages.
+        # Also, the default verbatim environment doesn't allow text to follow the
+        # end-of-environment command.
+        # If the verbatim package is ever desired, simply uncomment the following:
+        # preamble_additions.append('\\usepackage{verbatim}')
+        pass
+    elif args.listing == 'fancyvrb':
+        preamble_additions.append('\\usepackage{fancyvrb}')
+    elif args.listing == 'listings':
+        preamble_additions.append('\\usepackage{listings}')
+    elif args.listing == 'minted':
+        preamble_additions.append('\\usepackage{minted}')
+    elif args.listing == 'pythontex':
+        preamble_additions.append('\\usepackage{pythontex}')
+    return preamble_additions
 
 
 
-
-# Make sure we have a valid texfile
-texfile_name = os.path.expanduser(os.path.normcase(args.TEXNAME))
-if not os.path.isfile(texfile_name):
-    resolved = False
+def find_texfile(args):
+    """Make sure we have a valid texfile."""
+    texfile_name = os.path.expanduser(os.path.normcase(args.TEXNAME))
+    if os.path.isfile(texfile_name):
+        return texfile_name
     if not texfile_name.endswith('.tex'):
         for ext in ('.tex', '.ltx', '.dtx'):
             if os.path.isfile(texfile_name + ext):
-                texfile_name = texfile_name + ext
-                resolved = True
-                break
-    if not resolved:
-        print('* DePythonTeX error:')
-        print('    Could not locate file "' + texfile_name + '"')
-        sys.exit(1)
-# Make sure we have a valid outfile
-if args.output is not None:
-    outfile_name = os.path.expanduser(os.path.normcase(args.output))
-    if not args.overwrite and os.path.isfile(outfile_name):
-        print('* DePythonTeX warning:')
-        print('    Output file "' + outfile_name + '" already exists')
-        ans = input('    Do you want to overwrite this file? [y,n]\n    ')
-        if ans != 'y':
-            sys.exit(1)
-# Make sure the .depytx file exists
-depytxfile_name = texfile_name.rsplit('.')[0] + '.depytx'
-if not os.path.isfile(depytxfile_name):
-    print('* DePythonTeX error:')
-    print('    Could not find DePythonTeX auxiliary file "' + depytxfile_name + '"')
-    print('    Use package option depythontex to creat it')
-    sys.exit(1)
+                return texfile_name + ext
 
 
+def read_macros(filename, encoding):
+    """Read in the macros"""
+    if not os.path.isfile(os.path.expanduser(os.path.normcase(filename))):
+        return
 
-
-# Start opening files and loading data
-# Read in the LaTeX file
-# We read into a list with an empty first entry, so that we don't have to
-# worry about zero indexing when comparing list index to file line number
-f = open(texfile_name, 'r', encoding=encoding)
-tex = ['']
-tex.extend(f.readlines())
-f.close()
-# Load the .depytx
-f = open(depytxfile_name, 'r', encoding=encoding)
-depytx = f.readlines()
-f.close()
-# Process the .depytx by getting the settings contained in the last few lines
-settings = dict()
-n = len(depytx) - 1
-while depytx[n].startswith('=>DEPYTHONTEX:SETTINGS#'):
-    content = depytx[n].split('#', 1)[1].rsplit('#', 1)[0]
-    k, v = content.split('=', 1)
-    if v in ('true', 'True'):
-        v = True
-    elif v in ('false', 'False'):
-        v = False
-    settings[k] = v
-    depytx[n] = ''
-    n -= 1
-# Check .depytx version to make sure it is compatible
-if settings['version'] != __version__:
-    print('* DePythonTeX warning:')
-    print('    Version mismatch with DePythonTeX auxiliary file')
-    print('    Do a complete compile cycle to update the auxiliary file')
-    print('    Attempting to proceed')
-# Go ahead and open the outfile, even though we don't need it until the end
-# This lets us change working directories for convenience without worrying
-# about having to modify the outfile path
-if args.output is not None:
-    outfile = open(outfile_name, 'w', encoding=encoding)
-
-
-
-
-# Change working directory to the document directory
-# Technically, we could get by without this, but that would require a lot of
-# path modification.  This way, we can just use all paths straight out of the
-# .depytx without any modification, which is much simpler and less error-prone.
-if os.path.split(texfile_name)[0] != '':
-    os.chdir(os.path.split(texfile_name)[0])
-
-
-
-
-# Open and process the file of macros
-# Read in the macros
-if os.path.isfile(os.path.expanduser(os.path.normcase(settings['macrofile']))):
-    f = open(os.path.expanduser(os.path.normcase(settings['macrofile'])), 'r', encoding=encoding)
+    f = open(os.path.expanduser(os.path.normcase(filename)), 'r',
+             encoding=encoding)
     macros = f.readlines()
     f.close()
-else:
-    print('* DePythonTeX error:')
-    print('    The macro file could not be found:')
-    print('      "' + settings['macrofile'] + '"')
-    print('    Run PythonTeX to create it')
-    sys.exit(1)
-# Create a dict for storing macros
-macrodict = defaultdict(list)
-# Create variables for keeping track of whether we're inside a macro or
-# environment
-# These must exist before we begin processing
-inside_macro = False
-inside_environment = False
-# Loop through the macros, and extract everything
-# We just extract content; we get content wrappers later, when we process all
-# substituted content
-for line in macros:
-    if inside_macro:
-        # If we're in a macro, look for the end-of-macro command
-        if r'\endpytx@SVMCR' in line:
-            # If the current line contains the end-of-macro command, split
-            # off any content that comes before it.  Also reset
-            # `inside_macro`.
-            macrodict[current_macro].append(line.rsplit(r'\endpytx@SVMCR', 1)[0])
-            inside_macro = False
-        else:
-            # If the current line doesn't end the macro, we add the whole
-            # line to the macro dict
-            macrodict[current_macro].append(line)
-    elif inside_environment:
-        if line.startswith(end_environment):
-            # If the environment is ending, we reset inside_environment
-            inside_environment = False
-        else:
-            # If we're still in the environment, add the current line to the
-            # macro dict
-            macrodict[current_macro].append(line)
-    else:
-        # If we're not in a macro or environment, we need to figure out which
-        # we are dealing with (if either; there are blank lines in the macro
-        # file to increase readability).  Once we've determined which one,
-        # we need to get its name and extract any content.
-        if line.startswith(r'\begin{'):
-            # Any \begin will indicate a use of fancyvrb to save verbatim
-            # content, since that is the only time an environment is used in
-            # the macro file.  All other content is saved in a standard macro.
-            # We extract the name of the macro in which the verbatim content
-            # is saved.
-            current_macro = line.rsplit('{', 1)[1].rstrip('}\n')
-            inside_environment = True
-            # We assemble the end-of-environment string we will need to look
-            # for.  We don't assume any particular name, for generality.
-            end_environment = r'\end{' + line.split('}', 1)[0].split('{', 1)[1] + '}'
-            # Code typset in an environment needs to have a leading newline,
-            # because the content of a normal verbatim environment keeps its
-            # leading newline.
-            macrodict[current_macro].append('\n')
-        elif line.startswith(r'\pytx@SVMCR{'):
-            # Any regular macro will use `\pytx@SVMCR`
-            current_macro = line.split('{', 1)[1].split('}', 1)[0]
-            inside_macro = True
-            # Any content will always be on the next line, so we don't need
-            # to check for it
 
-
-
-
-# Do the actual processing
-# Create a variable for keeping track of the current line in the LaTeX file
-# Start at 1, since the first entry in the tex list is `''`
-texlinenum = 1
-# Create a variable for storing the current line(s) we are processing.
-# This contains all lines from immediately after the last successfully
-# processed line up to and including texlinenum.  We may have to process
-# multiple lines at once if a macro is split over multiple lines, etc.
-texcontent = tex[texlinenum]
-# Create a list for storing processed content.
-texout = list()
-# Loop through the depytx and process
-for n, depytxline in enumerate(depytx):
-    if depytxline.startswith('=>DEPYTHONTEX#'):
-        # Process info
-        depytxcontent = depytxline.split('#', 1)[1].rstrip('#\n')
-        depy_type, depy_name, depy_args, depy_typeset, depy_linenum, depy_lexer = depytxcontent.split(':')
-        if depy_lexer == '':
-            depy_lexer = None
-
-        # Do a quick check on validity of info
-        # #### Eventually add 'cp' and 'pc'
-        if not (depy_type in ('cmd', 'env') and
-                all([letter in ('o', 'm', 'v', 'n', '|') for letter in depy_args]) and
-                ('|' not in depy_args or (depy_args.count('|') == 1 and depy_args.endswith('|'))) and
-                depy_typeset in ('c', 'p', 'n')):
-            print('* PythonTeX error:')
-            print('    Invalid \\Depythontex string for operation on line ' + str(depy_linenum))
-            print('    The offending string was ' + depytxcontent)
-            sys.exit(1)
-        # If depy_args contains a `|` to indicate `\obeylines`, strip it and
-        # store in a variable.  Create a bool to keep track of obeylines
-        # status, which governs whether we can look on the next line for
-        # arguments.  (If obeylines is active, a newline terminates the
-        # argument search.)
-        if depy_args.endswith('|'):
-            obeylines = True
-            depy_args = depy_args.rstrip('|')
-        else:
-            obeylines = False
-        # Get the line number as an integer
-        # We don't have to adjust for zero indexing in tex
-        depy_linenum = int(depy_linenum)
-
-
-        # Check for information passed from LaTeX
-        # This will be extra listings information, or replacements to plug in
-        code_replacement = None
-        code_replacement_mode = None
-        print_replacement = None
-        print_replacement_mode = None
-        firstnumber = None
-        source = None
-        scan_ahead_line = n + 1
-        nextdepytxline = depytx[scan_ahead_line]
-        while not nextdepytxline.startswith('=>DEPYTHONTEX#'):
-            if nextdepytxline.startswith('LISTING:'):
-                listingcontent = nextdepytxline.split(':', 1)[1].rstrip('\n')
-                if bool(match(r'firstnumber=\d+$', listingcontent)):
-                    firstnumber = listingcontent.split('=', 1)[1]
-                else:
-                    print('* DePythonTeX error:')
-                    print('    Unknown information in listings data on line ' + str(depy_linenum))
-                    print('    The listings content was "' + listingcontent + '"')
-                    sys.exit(1)
-            elif nextdepytxline.startswith('MACRO:'):
-                source = 'macro'
-                try:
-                    typeset, macro = nextdepytxline.rstrip('\n').split(':', 2)[1:]
-                except:
-                    print('* DePythonTeX error:')
-                    print('    Improperly formatted macro information on line ' + str(depy_linenum))
-                    print('    The macro information was "' + nextdepytxline + '"')
-                    sys.exit(1)
-                if macro not in macrodict:
-                    print('* DePythonTeX error:')
-                    print('    Could not find replacement content for macro "' + macro + '"')
-                    print('    This is probably because the document needs to be recompiled')
-                    sys.exit(1)
-                if typeset == 'c':
-                    if depy_type == 'cmd':
-                        code_replacement = ''.join(macrodict[macro]).strip('\n')
-                    else:
-                        code_replacement = ''.join(macrodict[macro])
-                elif typeset == 'p':
-                    print_replacement = ''.join(macrodict[macro])
-                else:
-                    print('* DePythonTeX error:')
-                    print('    Improper typesetting information for macro information on line ' + str(depy_linenum))
-                    print('    The macro information was "' + nextdepytxline + '"')
-                    sys.exit(1)
-            elif nextdepytxline.startswith('FILE:'):
-                source = 'file'
-                try:
-                    typeset, f_name = nextdepytxline.rstrip('\n').split(':', 2)[1:]
-                except:
-                    print('* DePythonTeX error:')
-                    print('    Improperly formatted file information on line ' + str(depy_linenum))
-                    print('    The file information was "' + nextdepytxline + '"')
-                    sys.exit(1)
-                # Files that are brought in have an optional mode that
-                # determines if they need special handling (for example, verbatim)
-                if ':mode=' in f_name:
-                    f_name, mode = f_name.split(':mode=')
-                else:
-                    mode = None
-                f = open(os.path.expanduser(os.path.normcase(f_name)), 'r', encoding=encoding)
-                replacement = f.read()
-                f.close()
-                if typeset == 'c':
-                    code_replacement_mode = mode
-                    if depy_type == 'cmd' and code_replacement_mode != 'verbatim':
-                        # Usually, code from commands is typeset with commands
-                        # and code from environments is typeset in
-                        # environments.  The except is code from commands
-                        # that bring in external files, like `\inputpygments`
-                        code_replacement = replacement
-                    else:
-                        # If we're replacing an environment of code with a
-                        # file, then we lose the newline at the beginning
-                        # of the environment, and need to get it back.
-                        code_replacement = '\n' + replacement
-                elif typeset == 'p':
-                    print_replacement_mode = mode
-                    print_replacement = replacement
-                else:
-                    print('* DePythonTeX error:')
-                    print('    Improper typesetting information for file information on line ' + str(depy_linenum))
-                    print('    The file information was "' + nextdepytxline + '"')
-                    sys.exit(1)
-            # Increment the line in depytx to check for more information
-            # from LaTeX
-            scan_ahead_line += 1
-            if scan_ahead_line == len(depytx):
-                break
+    # Create a dict for storing macros
+    macrodict = defaultdict(list)
+    # Create variables for keeping track of whether we're inside a macro or
+    # environment
+    # These must exist before we begin processing
+    inside_macro = False
+    inside_environment = False
+    # Loop through the macros, and extract everything
+    # We just extract content; we get content wrappers later, when we process all
+    # substituted content
+    for line in macros:
+        if inside_macro:
+            # If we're in a macro, look for the end-of-macro command
+            if r'\endpytx@SVMCR' in line:
+                # If the current line contains the end-of-macro command, split
+                # off any content that comes before it.  Also reset
+                # `inside_macro`.
+                macrodict[current_macro].append(line.rsplit(r'\endpytx@SVMCR', 1)[0])
+                inside_macro = False
             else:
-                nextdepytxline = depytx[scan_ahead_line]
+                # If the current line doesn't end the macro, we add the whole
+                # line to the macro dict
+                macrodict[current_macro].append(line)
+        elif inside_environment:
+            if line.startswith(end_environment):
+                # If the environment is ending, we reset inside_environment
+                inside_environment = False
+            else:
+                # If we're still in the environment, add the current line to the
+                # macro dict
+                macrodict[current_macro].append(line)
+        else:
+            # If we're not in a macro or environment, we need to figure out which
+            # we are dealing with (if either; there are blank lines in the macro
+            # file to increase readability).  Once we've determined which one,
+            # we need to get its name and extract any content.
+            if line.startswith(r'\begin{'):
+                # Any \begin will indicate a use of fancyvrb to save verbatim
+                # content, since that is the only time an environment is used in
+                # the macro file.  All other content is saved in a standard macro.
+                # We extract the name of the macro in which the verbatim content
+                # is saved.
+                current_macro = line.rsplit('{', 1)[1].rstrip('}\n')
+                inside_environment = True
+                # We assemble the end-of-environment string we will need to look
+                # for.  We don't assume any particular name, for generality.
+                end_environment = r'\end{' + line.split('}', 1)[0].split('{', 1)[
+                    1] + '}'
+                # Code typset in an environment needs to have a leading newline,
+                # because the content of a normal verbatim environment keeps its
+                # leading newline.
+                macrodict[current_macro].append('\n')
+            elif line.startswith(r'\pytx@SVMCR{'):
+                # Any regular macro will use `\pytx@SVMCR`
+                current_macro = line.split('{', 1)[1].split('}', 1)[0]
+                inside_macro = True
+                # Any content will always be on the next line, so we don't need
+                # to check for it
+    return macrodict
 
 
-        # If the line we're looking for is within the range currently held by
-        # texcontent, do nothing.  Otherwise, transfer content from tex
-        # to texout until we get to the line of tex that we're looking for
-        if depy_linenum > texlinenum:
-            texout.append(texcontent)
-            texlinenum += 1
-            while texlinenum < depy_linenum:
-                texout.append(tex[texlinenum])
-                texlinenum += 1
-            texcontent = tex[texlinenum]
+def do_the_actual_processing(tex, depytx, macrodict, encoding, settings):
+    # Create a variable for keeping track of the current line in the LaTeX file
+    # Start at 1, since the first entry in the tex list is `''`
+    texlinenum = 1
+    # Create a variable for storing the current line(s) we are processing.
+    # This contains all lines from immediately after the last successfully
+    # processed line up to and including texlinenum.  We may have to process
+    # multiple lines at once if a macro is split over multiple lines, etc.
+    texcontent = tex[texlinenum]
+    # Create a list for storing processed content.
+    texout = list()
+    # Loop through the depytx and process
+    for n, depytxline in enumerate(depytx):
+        if depytxline.startswith('=>DEPYTHONTEX#'):
+            # Process info
+            depytxcontent = depytxline.split('#', 1)[1].rstrip('#\n')
+            depy_type, depy_name, depy_args, depy_typeset, depy_linenum, depy_lexer = depytxcontent.split(
+                ':')
+            if depy_lexer == '':
+                depy_lexer = None
 
-
-        # Deal with arguments
-        # All arguments are parsed and stored in a list variables, even if
-        # they are not used, for completeness; this makes it easy to add
-        # functionality
-        # Start by splitting the current line into what comes before the
-        # command or environment, and what is after it
-        if depy_type == 'cmd':
-            try:
-                before, after = texcontent.split('\\' + depy_name, 1)
-            except:
-                print('* DePythonTeX error:')
-                print('    Could not find command "' + depy_name + '" on line ' + str(depy_linenum))
+            # Do a quick check on validity of info
+            # #### Eventually add 'cp' and 'pc'
+            if not (depy_type in ('cmd', 'env') and
+                    all([letter in ('o', 'm', 'v', 'n', '|') for letter in
+                         depy_args]) and
+                    ('|' not in depy_args or (
+                            depy_args.count('|') == 1 and depy_args.endswith('|'))) and
+                    depy_typeset in ('c', 'p', 'n')):
+                print('* PythonTeX error:')
+                print('    Invalid \\Depythontex string for operation on line ' + str(
+                    depy_linenum))
+                print('    The offending string was ' + depytxcontent)
                 sys.exit(1)
-        else:  # depy_type == 'env':
-            try:
-                before, after = texcontent.split(r'\begin{' + depy_name + '}', 1)
-            except:
-                print('* DePythonTeX error:')
-                print('    Could not find environment "' + depy_name + '" on line ' + str(depy_linenum))
-                sys.exit(1)
-        # We won't need the content from before the command or environment
-        # again, so we go ahead and store it
-        texout.append(before)
+            # If depy_args contains a `|` to indicate `\obeylines`, strip it and
+            # store in a variable.  Create a bool to keep track of obeylines
+            # status, which governs whether we can look on the next line for
+            # arguments.  (If obeylines is active, a newline terminates the
+            # argument search.)
+            if depy_args.endswith('|'):
+                obeylines = True
+                depy_args = depy_args.rstrip('|')
+            else:
+                obeylines = False
+            # Get the line number as an integer
+            # We don't have to adjust for zero indexing in tex
+            depy_linenum = int(depy_linenum)
 
-        # Parse the arguments
-        # Create a list for storing the recovered arguments
-        arglist = list()
-        for argindex, arg in enumerate(depy_args):
-            if arg == 'n':
-                pass
-            elif arg == 'o':
-                if after[0] == '[':
-                    # Account for possible line breaks before end of arg
-                    while ']' not in after:
-                        texlinenum += 1
-                        after += tex[texlinenum]
-                    optarg, after = after[1:].split(']', 1)
-                else:
-                    if obeylines:
-                        # Take into account possible whitespace before arg
-                        if bool(match('[ \t]*\[', after)):
-                            after = after.split('[', 1)[1]
-                            while ']' not in after:
-                                texlinenum += 1
-                                after += tex[texlinenum]
-                            optarg, after = after.split(']', 1)
-                        else:
-                            optarg = None
-                            # If this is the last arg, and it wasn't found,
-                            # the macro should eat all whitespace following it
-                            if argindex == len(depy_args) - 1:
-                                after = sub('^[ \t]*', '', after)
+            # Check for information passed from LaTeX
+            # This will be extra listings information, or replacements to plug in
+            code_replacement = None
+            code_replacement_mode = None
+            print_replacement = None
+            print_replacement_mode = None
+            firstnumber = None
+            source = None
+            scan_ahead_line = n + 1
+            nextdepytxline = depytx[scan_ahead_line]
+            while not nextdepytxline.startswith('=>DEPYTHONTEX#'):
+                if nextdepytxline.startswith('LISTING:'):
+                    listingcontent = nextdepytxline.split(':', 1)[1].rstrip('\n')
+                    if bool(match(r'firstnumber=\d+$', listingcontent)):
+                        firstnumber = listingcontent.split('=', 1)[1]
                     else:
-                        # Allow peeking ahead a line for the argument
-                        if bool(match('\s*$', after)) and after.count('\n') < 2:
+                        print('* DePythonTeX error:')
+                        print('    Unknown information in listings data on line ' + str(
+                            depy_linenum))
+                        print('    The listings content was "' + listingcontent + '"')
+                        sys.exit(1)
+                elif nextdepytxline.startswith('MACRO:'):
+                    source = 'macro'
+                    try:
+                        typeset, macro = nextdepytxline.rstrip('\n').split(':', 2)[1:]
+                    except:
+                        print('* DePythonTeX error:')
+                        print(
+                            '    Improperly formatted macro information on line ' + str(
+                                depy_linenum))
+                        print('    The macro information was "' + nextdepytxline + '"')
+                        sys.exit(1)
+                    if macro not in macrodict:
+                        print('* DePythonTeX error:')
+                        print(
+                            '    Could not find replacement content for macro "' + macro + '"')
+                        print(
+                            '    This is probably because the document needs to be recompiled')
+                        sys.exit(1)
+                    if typeset == 'c':
+                        if depy_type == 'cmd':
+                            code_replacement = ''.join(macrodict[macro]).strip('\n')
+                        else:
+                            code_replacement = ''.join(macrodict[macro])
+                    elif typeset == 'p':
+                        print_replacement = ''.join(macrodict[macro])
+                    else:
+                        print('* DePythonTeX error:')
+                        print(
+                            '    Improper typesetting information for macro information on line ' + str(
+                                depy_linenum))
+                        print('    The macro information was "' + nextdepytxline + '"')
+                        sys.exit(1)
+                elif nextdepytxline.startswith('FILE:'):
+                    source = 'file'
+                    try:
+                        typeset, f_name = nextdepytxline.rstrip('\n').split(':', 2)[1:]
+                    except:
+                        print('* DePythonTeX error:')
+                        print(
+                            '    Improperly formatted file information on line ' + str(
+                                depy_linenum))
+                        print('    The file information was "' + nextdepytxline + '"')
+                        sys.exit(1)
+                    # Files that are brought in have an optional mode that
+                    # determines if they need special handling (for example, verbatim)
+                    if ':mode=' in f_name:
+                        f_name, mode = f_name.split(':mode=')
+                    else:
+                        mode = None
+                    f = open(os.path.expanduser(os.path.normcase(f_name)), 'r',
+                             encoding=encoding)
+                    replacement = f.read()
+                    f.close()
+                    if typeset == 'c':
+                        code_replacement_mode = mode
+                        if depy_type == 'cmd' and code_replacement_mode != 'verbatim':
+                            # Usually, code from commands is typeset with commands
+                            # and code from environments is typeset in
+                            # environments.  The except is code from commands
+                            # that bring in external files, like `\inputpygments`
+                            code_replacement = replacement
+                        else:
+                            # If we're replacing an environment of code with a
+                            # file, then we lose the newline at the beginning
+                            # of the environment, and need to get it back.
+                            code_replacement = '\n' + replacement
+                    elif typeset == 'p':
+                        print_replacement_mode = mode
+                        print_replacement = replacement
+                    else:
+                        print('* DePythonTeX error:')
+                        print(
+                            '    Improper typesetting information for file information on line ' + str(
+                                depy_linenum))
+                        print('    The file information was "' + nextdepytxline + '"')
+                        sys.exit(1)
+                # Increment the line in depytx to check for more information
+                # from LaTeX
+                scan_ahead_line += 1
+                if scan_ahead_line == len(depytx):
+                    break
+                else:
+                    nextdepytxline = depytx[scan_ahead_line]
+
+            # If the line we're looking for is within the range currently held by
+            # texcontent, do nothing.  Otherwise, transfer content from tex
+            # to texout until we get to the line of tex that we're looking for
+            if depy_linenum > texlinenum:
+                texout.append(texcontent)
+                texlinenum += 1
+                while texlinenum < depy_linenum:
+                    texout.append(tex[texlinenum])
+                    texlinenum += 1
+                texcontent = tex[texlinenum]
+
+            # Deal with arguments
+            # All arguments are parsed and stored in a list variables, even if
+            # they are not used, for completeness; this makes it easy to add
+            # functionality
+            # Start by splitting the current line into what comes before the
+            # command or environment, and what is after it
+            if depy_type == 'cmd':
+                try:
+                    before, after = texcontent.split('\\' + depy_name, 1)
+                except:
+                    print('* DePythonTeX error:')
+                    print(
+                        '    Could not find command "' + depy_name + '" on line ' + str(
+                            depy_linenum))
+                    sys.exit(1)
+            else:  # depy_type == 'env':
+                try:
+                    before, after = texcontent.split(r'\begin{' + depy_name + '}', 1)
+                except:
+                    print('* DePythonTeX error:')
+                    print(
+                        '    Could not find environment "' + depy_name + '" on line ' + str(
+                            depy_linenum))
+                    sys.exit(1)
+            # We won't need the content from before the command or environment
+            # again, so we go ahead and store it
+            texout.append(before)
+
+            # Parse the arguments
+            # Create a list for storing the recovered arguments
+            arglist = list()
+            for argindex, arg in enumerate(depy_args):
+                if arg == 'n':
+                    pass
+                elif arg == 'o':
+                    if after[0] == '[':
+                        # Account for possible line breaks before end of arg
+                        while ']' not in after:
                             texlinenum += 1
                             after += tex[texlinenum]
-                        # Take into account possible whitespace before arg
-                        if bool(match('\s*\[', after)):
-                            after = after.split('[', 1)[1]
-                            while ']' not in after:
-                                texlinenum += 1
-                                after += tex[texlinenum]
-                            optarg, after = after.split(']', 1)
-                        else:
-                            optarg = None
-                            # Account for eating whitespace afterward, if arg not found
-                            if argindex == len(depy_args) - 1:
-                                if bool(match('\s*$', after)) and after.count('\n') < 2:
+                        optarg, after = after[1:].split(']', 1)
+                    else:
+                        if obeylines:
+                            # Take into account possible whitespace before arg
+                            if bool(match('[ \t]*\[', after)):
+                                after = after.split('[', 1)[1]
+                                while ']' not in after:
                                     texlinenum += 1
                                     after += tex[texlinenum]
-                                if not bool(match('\s*$', after)):
-                                    after = sub('^\s*', '', after)
-                arglist.append(optarg)
-            elif arg == 'm':
-                # Account for possible line breaks or spaces before arg
-                if after[0] == '{':
-                    after = after[1:]
-                else:
-                    if obeylines:
-                        # Account for possible leading whitespace
-                        if bool(match('[ \t\f\v]*\{', after)):
-                            after = after.split('{', 1)[1]
+                                optarg, after = after.split(']', 1)
+                            else:
+                                optarg = None
+                                # If this is the last arg, and it wasn't found,
+                                # the macro should eat all whitespace following it
+                                if argindex == len(depy_args) - 1:
+                                    after = sub('^[ \t]*', '', after)
                         else:
-                            print('* DePythonTeX error:')
-                            print('    Flawed mandatory argument for "' + depy_name + '" on line ' + str(depy_linenum))
-                            sys.exit(1)
+                            # Allow peeking ahead a line for the argument
+                            if bool(match('\s*$', after)) and after.count('\n') < 2:
+                                texlinenum += 1
+                                after += tex[texlinenum]
+                            # Take into account possible whitespace before arg
+                            if bool(match('\s*\[', after)):
+                                after = after.split('[', 1)[1]
+                                while ']' not in after:
+                                    texlinenum += 1
+                                    after += tex[texlinenum]
+                                optarg, after = after.split(']', 1)
+                            else:
+                                optarg = None
+                                # Account for eating whitespace afterward, if arg not found
+                                if argindex == len(depy_args) - 1:
+                                    if bool(match('\s*$', after)) and after.count(
+                                            '\n') < 2:
+                                        texlinenum += 1
+                                        after += tex[texlinenum]
+                                    if not bool(match('\s*$', after)):
+                                        after = sub('^\s*', '', after)
+                    arglist.append(optarg)
+                elif arg == 'm':
+                    # Account for possible line breaks or spaces before arg
+                    if after[0] == '{':
+                        after = after[1:]
                     else:
-                        # Peek ahead a line if needed
-                        if bool(match('\s*$', after)) and after.count('\n') < 2:
-                            texlinenum += 1
-                            after += tex[texlinenum]
-                        if bool(match('\s*\{', after)):
-                            after = after.split('{', 1)[1]
+                        if obeylines:
+                            # Account for possible leading whitespace
+                            if bool(match('[ \t\f\v]*\{', after)):
+                                after = after.split('{', 1)[1]
+                            else:
+                                print('* DePythonTeX error:')
+                                print(
+                                    '    Flawed mandatory argument for "' + depy_name + '" on line ' + str(
+                                        depy_linenum))
+                                sys.exit(1)
                         else:
-                            print('* DePythonTeX error:')
-                            print('    Flawed mandatory argument for "' + depy_name + '" on line ' + str(depy_linenum))
-                            sys.exit(1)
-                # Go through the argument character by character to find the
-                # closing brace.
-                # If possible, use a very simple approach
-                if (r'\{' not in after and r'\}' not in after and
-                        r'\string' not in after and
-                        after.count('{') + 1 == after.count('}')):
-                    pos = 0
-                    lbraces = 1
-                    rbraces = 0
-                    while True:
-                        if after[pos] == '{':
-                            lbraces += 1
-                        elif after[pos] == '}':
-                            rbraces += 1
-                        if lbraces == rbraces:
-                            break
-                        pos += 1
-                        if pos == len(after):
-                            texlinenum += 1
-                            after += tex[texlinenum]
-                # If a simple parsing approach won't work, parse in much
-                # greater depth
-                else:
-                    pos = 0
-                    lbraces = 1
-                    rbraces = 0
-                    while True:
-                        if after[pos] == '{':
-                            # If the current character is a brace, we count it
-                            lbraces += 1
+                            # Peek ahead a line if needed
+                            if bool(match('\s*$', after)) and after.count('\n') < 2:
+                                texlinenum += 1
+                                after += tex[texlinenum]
+                            if bool(match('\s*\{', after)):
+                                after = after.split('{', 1)[1]
+                            else:
+                                print('* DePythonTeX error:')
+                                print(
+                                    '    Flawed mandatory argument for "' + depy_name + '" on line ' + str(
+                                        depy_linenum))
+                                sys.exit(1)
+                    # Go through the argument character by character to find the
+                    # closing brace.
+                    # If possible, use a very simple approach
+                    if (r'\{' not in after and r'\}' not in after and
+                            r'\string' not in after and
+                            after.count('{') + 1 == after.count('}')):
+                        pos = 0
+                        lbraces = 1
+                        rbraces = 0
+                        while True:
+                            if after[pos] == '{':
+                                lbraces += 1
+                            elif after[pos] == '}':
+                                rbraces += 1
                             if lbraces == rbraces:
                                 break
                             pos += 1
-                        elif after[pos] == '}':
-                            # If the current character is a brace, we count it
-                            rbraces += 1
-                            if lbraces == rbraces:
-                                break
-                            pos += 1
-                        elif after[pos:].startswith(r'\string'):
-                            # If the current position marks the beginning of `\string`, we
-                            # resolve the `\string` command
-                            # First, jump ahead to after `\string`
-                            pos += 7 #+= len(r'\string')
-                            # See if `\string` is followed by a regular macro
-                            # If so, jump past it; otherwise, figure out if a
-                            # single-character macro, or just a single character, is next,
-                            # and jump past it
-                            standard_macro = match(r'\\[a-zA-Z]+', line[pos:])
-                            if bool(standard_macro):
-                                pos += standard_macro.end()
-                            elif line[pos] == '\\':
-                                pos += 2
+                            if pos == len(after):
+                                texlinenum += 1
+                                after += tex[texlinenum]
+                    # If a simple parsing approach won't work, parse in much
+                    # greater depth
+                    else:
+                        pos = 0
+                        lbraces = 1
+                        rbraces = 0
+                        while True:
+                            if after[pos] == '{':
+                                # If the current character is a brace, we count it
+                                lbraces += 1
+                                if lbraces == rbraces:
+                                    break
+                                pos += 1
+                            elif after[pos] == '}':
+                                # If the current character is a brace, we count it
+                                rbraces += 1
+                                if lbraces == rbraces:
+                                    break
+                                pos += 1
+                            elif after[pos:].startswith(r'\string'):
+                                # If the current position marks the beginning of `\string`, we
+                                # resolve the `\string` command
+                                # First, jump ahead to after `\string`
+                                pos += 7  # += len(r'\string')
+                                # See if `\string` is followed by a regular macro
+                                # If so, jump past it; otherwise, figure out if a
+                                # single-character macro, or just a single character, is next,
+                                # and jump past it
+                                standard_macro = match(r'\\[a-zA-Z]+', after[pos:])
+                                if bool(standard_macro):
+                                    pos += standard_macro.end()
+                                elif after[pos] == '\\':
+                                    pos += 2
+                                else:
+                                    pos += 1
+                            elif after[pos] == '\\':
+                                # If the current position is a backslash, figure out what
+                                # macro is used, and jump past it
+                                # The macro must either be a standard alphabetic macro,
+                                # or a single-character macro
+                                standard_macro = match(r'\\[a-zA-Z]+', tex[texlinenum][pos:])
+                                if bool(standard_macro):
+                                    pos += standard_macro.end()
+                                else:
+                                    pos += 2
                             else:
                                 pos += 1
-                        elif line[pos] == '\\':
-                            # If the current position is a backslash, figure out what
-                            # macro is used, and jump past it
-                            # The macro must either be a standard alphabetic macro,
-                            # or a single-character macro
-                            standard_macro = match(r'\\[a-zA-Z]+', line[pos:])
-                            if bool(standard_macro):
-                                pos += standard_macro.end()
-                            else:
-                                pos += 2
-                        else:
+                            if pos == len(after):
+                                texlinenum += 1
+                                after += tex[texlinenum]
+                    mainarg = after[:pos]
+                    after = after[pos + 1:]
+                    arglist.append(mainarg)
+                elif arg == 'v':
+                    if after[0] == '{':
+                        # Account for the possibility of matched brace delimiters
+                        # Not all verbatim commands allow for these
+                        pos = 1
+                        lbraces = 1
+                        rbraces = 0
+                        while True:
+                            if after[pos] == '{':
+                                lbraces += 1
+                            elif after[pos] == '}':
+                                rbraces += 1
+                            if lbraces == rbraces:
+                                break
                             pos += 1
-                        if pos == len(after):
+                            if pos == len(after):
+                                texlinenum += 1
+                                after += tex[texlinenum]
+                        mainarg = after[1:pos]
+                        after = after[pos + 1:]
+                    else:
+                        # Deal with matched character delims
+                        delim = after[0]
+                        while after.count(delim) < 2:
                             texlinenum += 1
                             after += tex[texlinenum]
-                mainarg = after[:pos]
-                after = after[pos+1:]
-                arglist.append(mainarg)
-            elif arg == 'v':
-                if after[0] == '{':
-                    # Account for the possibility of matched brace delimiters
-                    # Not all verbatim commands allow for these
-                    pos = 1
-                    lbraces = 1
-                    rbraces = 0
-                    while True:
-                        if after[pos] == '{':
-                            lbraces += 1
-                        elif after[pos] == '}':
-                            rbraces += 1
-                        if lbraces == rbraces:
-                            break
-                        pos += 1
-                        if pos == len(after):
-                            texlinenum += 1
-                            after += tex[texlinenum]
-                    mainarg = after[1:pos]
-                    after = after[pos+1:]
-                else:
-                    # Deal with matched character delims
-                    delim = after[0]
-                    while after.count(delim) < 2:
+                        mainarg, after = after[1:].split(delim, 1)
+                    arglist.append(mainarg)
+
+            # Do substitution, depending on what is required
+            # Need a variable for processed content to be added to texout
+            processed = None
+            if depy_typeset == 'c':
+                if depy_type == 'cmd':
+                    # Make sure that `after` contains two lines of content
+                    # This is needed for some replacements that need to look ahead
+                    if after.count('\n') < 2:
                         texlinenum += 1
                         after += tex[texlinenum]
-                    mainarg, after = after[1:].split(delim, 1)
-                arglist.append(mainarg)
-
-
-        # Do substitution, depending on what is required
-        # Need a variable for processed content to be added to texout
-        processed = None
-        if depy_typeset == 'c':
-            if depy_type == 'cmd':
-                # Make sure that `after` contains two lines of content
-                # This is needed for some replacements that need to look ahead
-                if after.count('\n') < 2:
-                    texlinenum += 1
-                    after += tex[texlinenum]
-                processed, texcontent = replace_code_cmd(depy_name, arglist,
-                                                         depy_linenum,
-                                                         code_replacement,
-                                                         code_replacement_mode,
-                                                         after, depy_lexer,
-                                                         firstnumber)
-            else:  # depy_type == 'env'
-                end_environment = r'\end{' + depy_name + '}'
-                if code_replacement is None:
-                    if end_environment not in after:
-                        while True:
-                            texlinenum += 1
-                            after += tex[texlinenum]
-                            if end_environment in tex[texlinenum]:
-                                break
-                    code_replacement, after = after.split(end_environment, 1)
-                    # If there's content on the line with the end-environment
-                    # command, it should be discarded, to imitate TeX
-                    if not code_replacement.endswith('\n'):
-                        code_replacement = code_replacement.rsplit('\n', 1)[0] + '\n'
-                    # Take care of `gobble`
-                    if settings['gobble'] == 'auto':
-                        code_replacement = textwrap.dedent(code_replacement)
-                else:
+                    processed, texcontent = replace_code_cmd(depy_name, arglist,
+                                                             depy_linenum,
+                                                             code_replacement,
+                                                             code_replacement_mode,
+                                                             after, depy_lexer,
+                                                             firstnumber)
+                else:  # depy_type == 'env'
+                    end_environment = r'\end{' + depy_name + '}'
+                    if code_replacement is None:
+                        if end_environment not in after:
+                            while True:
+                                texlinenum += 1
+                                after += tex[texlinenum]
+                                if end_environment in tex[texlinenum]:
+                                    break
+                        code_replacement, after = after.split(end_environment, 1)
+                        # If there's content on the line with the end-environment
+                        # command, it should be discarded, to imitate TeX
+                        if not code_replacement.endswith('\n'):
+                            code_replacement = code_replacement.rsplit('\n', 1)[
+                                                   0] + '\n'
+                        # Take care of `gobble`
+                        if settings['gobble'] == 'auto':
+                            code_replacement = textwrap.dedent(code_replacement)
+                    else:
+                        if end_environment not in after:
+                            while True:
+                                texlinenum += 1
+                                if end_environment in tex[texlinenum]:
+                                    after = tex[texlinenum]
+                                    break
+                        after = after.split(end_environment, 1)[1]
+                    # Make sure that `after` contains two lines of content
+                    # This is needed for some replacements that need to look ahead
+                    if after.count('\n') < 2:
+                        texlinenum += 1
+                        after += tex[texlinenum]
+                    processed, texcontent = replace_code_env(depy_name, arglist,
+                                                             depy_linenum,
+                                                             code_replacement,
+                                                             code_replacement_mode,
+                                                             after, depy_lexer,
+                                                             firstnumber)
+            elif depy_typeset == 'p' and print_replacement is not None:
+                if depy_type == 'cmd':
+                    # Make sure that `after` contains two lines of content
+                    # This is needed for some replacements that need to look ahead
+                    if after.count('\n') < 2:
+                        texlinenum += 1
+                        after += tex[texlinenum]
+                    processed, texcontent = replace_print_cmd(depy_name, arglist,
+                                                              depy_linenum,
+                                                              print_replacement,
+                                                              print_replacement_mode,
+                                                              source,
+                                                              after)
+                else:  # depy_type == 'env'
+                    end_environment = r'\end{' + depy_name + '}'
                     if end_environment not in after:
                         while True:
                             texlinenum += 1
@@ -1273,146 +1239,233 @@ for n, depytxline in enumerate(depytx):
                                 after = tex[texlinenum]
                                 break
                     after = after.split(end_environment, 1)[1]
-                # Make sure that `after` contains two lines of content
-                # This is needed for some replacements that need to look ahead
-                if after.count('\n') < 2:
-                    texlinenum += 1
-                    after += tex[texlinenum]
-                processed, texcontent = replace_code_env(depy_name, arglist,
-                                                         depy_linenum,
-                                                         code_replacement,
-                                                         code_replacement_mode,
-                                                         after, depy_lexer,
-                                                         firstnumber)
-        elif depy_typeset == 'p' and print_replacement is not None:
-            if depy_type == 'cmd':
-                # Make sure that `after` contains two lines of content
-                # This is needed for some replacements that need to look ahead
-                if after.count('\n') < 2:
-                    texlinenum += 1
-                    after += tex[texlinenum]
-                processed, texcontent = replace_print_cmd(depy_name, arglist,
-                                                          depy_linenum,
-                                                          print_replacement,
-                                                          print_replacement_mode,
-                                                          source,
-                                                          after)
-            else:  # depy_type == 'env'
-                end_environment = r'\end{' + depy_name + '}'
-                if end_environment not in after:
-                    while True:
+                    # Make sure that `after` contains two lines of content
+                    # This is needed for some replacements that need to look ahead
+                    if after.count('\n') < 2:
                         texlinenum += 1
-                        if end_environment in tex[texlinenum]:
-                            after = tex[texlinenum]
-                            break
-                after = after.split(end_environment, 1)[1]
-                # Make sure that `after` contains two lines of content
-                # This is needed for some replacements that need to look ahead
-                if after.count('\n') < 2:
-                    texlinenum += 1
-                    after += tex[texlinenum]
-                processed, texcontent = replace_print_env(depy_name, arglist,
-                                                          depy_linenum,
-                                                          print_replacement,
-                                                          print_replacement_mode,
-                                                          source,
-                                                          after)
-        else:  # depy_typeset == 'n' or (depy_typeset == 'p' and print_replacement is None):
-            if depy_type == 'cmd':
-                texcontent = after
-            else:  # depy_type == 'env'
-                end_environment = r'\end{' + depy_name + '}'
-                if end_environment not in after:
-                    while True:
-                        texlinenum += 1
-                        if end_environment in tex[texlinenum]:
-                            after = tex[texlinenum]
-                            break
-                after = after.split(end_environment, 1)[1]
-                if bool(match('\s*\n', after)):
-                    # If the line following `after` is whitespace, it should
-                    # be stripped, since most environments throw away
-                    # anything after the end of the environment
-                    after = after.split('\n')[1]
-                texcontent = after
-        # #### Once it's supported on the TeX side, need to add support for
-        # pc and cp
+                        after += tex[texlinenum]
+                    processed, texcontent = replace_print_env(depy_name, arglist,
+                                                              depy_linenum,
+                                                              print_replacement,
+                                                              print_replacement_mode,
+                                                              source,
+                                                              after)
+            else:  # depy_typeset == 'n' or (depy_typeset == 'p' and print_replacement is None):
+                if depy_type == 'cmd':
+                    texcontent = after
+                else:  # depy_type == 'env'
+                    end_environment = r'\end{' + depy_name + '}'
+                    if end_environment not in after:
+                        while True:
+                            texlinenum += 1
+                            if end_environment in tex[texlinenum]:
+                                after = tex[texlinenum]
+                                break
+                    after = after.split(end_environment, 1)[1]
+                    if bool(match('\s*\n', after)):
+                        # If the line following `after` is whitespace, it should
+                        # be stripped, since most environments throw away
+                        # anything after the end of the environment
+                        after = after.split('\n')[1]
+                    texcontent = after
+            # #### Once it's supported on the TeX side, need to add support for
+            # pc and cp
+
+            # Store any processed content
+            if processed is not None:
+                texout.append(processed)
+
+    # Transfer anything that's left in tex to texout
+    texout.append(texcontent)
+    texout.extend(tex[texlinenum + 1:])
+    return texout
 
 
-        # Store any processed content
-        if processed is not None:
-            texout.append(processed)
+def main(argv=None):
+    # Process argv
+    args = parse_argv(argv)
+    encoding = args.encoding
+    global listing
+    listing = args.listing
+    if args.lexer_dict is not None:
+        args.lexer_dict = args.lexer_dict.replace(' ', '').replace("'", "").replace('"','').strip('{}')
+        for entry in args.lexer_dict.split(','):
+            k, v = entry.split(':')
+            lexer_dict[k] = v
+    preamble_additions = collect_preamble_additions(args)
 
 
-# Transfer anything that's left in tex to texout
-texout.append(texcontent)
-texout.extend(tex[texlinenum+1:])
+
+
+    # Let the user know things have started
+    if args.output is not None:
+        print('This is DePythonTeX {0}'.format(__version__))
+        sys.stdout.flush()
 
 
 
 
-# Replace the `\usepackage{pythontex}`
-for n, line in enumerate(texout):
-    if '{pythontex}' in line:
-        startline = n
-        while '\\usepackage' not in texout[startline] and startline >= 0:
-            startline -= 1
-        if startline == n:
-            if bool(search(r'\\usepackage(?:\[.*?\]){0,1}\{pythontex\}', line)):
-                texout[n] = sub(r'\\usepackage(?:\[.*?\]){0,1}\{pythontex\}', '', line)
-                if texout[n].isspace():
-                    texout[n] = ''
-                break
-        else:
-            content = ''.join(texout[startline:n+1])
-            if bool(search(r'(?s)\\usepackage(?:\[.*?\]\s*){0,1}\{pythontex\}', content)):
-                replacement = sub(r'(?s)\\usepackage(?:\[.*?\]\s*){0,1}\{pythontex\}', '', content)
-                if replacement.isspace():
-                    replacement = ''
-                texout[startline] = replacement
-                for l in range(startline+1, n+1):
-                    texout[l] = ''
-                break
-    elif line.startswith(r'\begin{document}'):
-        break
-if preamble_additions:
-    texout[n] += '\n'.join(preamble_additions) + '\n'
-# Take care of graphicspath
-if args.graphicspath and settings['graphicx']:
+    # Make sure we have a valid texfile
+    texfile_name = find_texfile(args)
+    if not texfile_name:
+        print('* DePythonTeX error:')
+        print('    Could not locate file "' + texfile_name + '"')
+        sys.exit(1)
+
+    # Make sure we have a valid outfile
+    if args.output is not None:
+        outfile_name = os.path.expanduser(os.path.normcase(args.output))
+        if not args.overwrite and os.path.isfile(outfile_name):
+            print('* DePythonTeX warning:')
+            print('    Output file "' + outfile_name + '" already exists')
+            ans = input('    Do you want to overwrite this file? [y,n]\n    ')
+            if ans != 'y':
+                sys.exit(1)
+
+    # Make sure the .depytx file exists
+    depytxfile_name = texfile_name.rsplit('.')[0] + '.depytx'
+    if not os.path.isfile(depytxfile_name):
+        print('* DePythonTeX error:')
+        print('    Could not find DePythonTeX auxiliary file "' + depytxfile_name + '"')
+        print('    Use package option depythontex to creat it')
+        sys.exit(1)
+
+
+
+
+    # Start opening files and loading data
+    # Read in the LaTeX file
+    # We read into a list with an empty first entry, so that we don't have to
+    # worry about zero indexing when comparing list index to file line number
+    f = open(texfile_name, 'r', encoding=encoding)
+    tex = ['']
+    tex.extend(f.readlines())
+    f.close()
+    # Load the .depytx
+    f = open(depytxfile_name, 'r', encoding=encoding)
+    depytx = f.readlines()
+    f.close()
+    # Process the .depytx by getting the settings contained in the last few lines
+    settings = dict()
+    n = len(depytx) - 1
+    while depytx[n].startswith('=>DEPYTHONTEX:SETTINGS#'):
+        content = depytx[n].split('#', 1)[1].rsplit('#', 1)[0]
+        k, v = content.split('=', 1)
+        if v in ('true', 'True'):
+            v = True
+        elif v in ('false', 'False'):
+            v = False
+        settings[k] = v
+        depytx[n] = ''
+        n -= 1
+    # Check .depytx version to make sure it is compatible
+    if settings['version'] != __version__:
+        print('* DePythonTeX warning:')
+        print('    Version mismatch with DePythonTeX auxiliary file')
+        print('    Do a complete compile cycle to update the auxiliary file')
+        print('    Attempting to proceed')
+    # Go ahead and open the outfile, even though we don't need it until the end
+    # This lets us change working directories for convenience without worrying
+    # about having to modify the outfile path
+    if args.output is not None:
+        outfile = open(outfile_name, 'w', encoding=encoding)
+
+
+
+
+    # Change working directory to the document directory
+    # Technically, we could get by without this, but that would require a lot of
+    # path modification.  This way, we can just use all paths straight out of the
+    # .depytx without any modification, which is much simpler and less error-prone.
+    if os.path.split(texfile_name)[0] != '':
+        os.chdir(os.path.split(texfile_name)[0])
+
+
+
+
+    # Open and process the file of macros
+    macrodict = read_macros(settings['macrofile'], encoding)
+    if macrodict is None:
+        print('* DePythonTeX error:')
+        print('    The macro file could not be found:')
+        print('      "' + settings['macrofile'] + '"')
+        print('    Run PythonTeX to create it')
+        sys.exit(1)
+
+
+
+    # Do the actual processing
+    texout = do_the_actual_processing(tex, depytx, macrodict, encoding, settings)
+
+
+
+
+    # Replace the `\usepackage{pythontex}`
     for n, line in enumerate(texout):
-        if '\\graphicspath' in line and not bool(match('\s*%', line)):
-            texout[n] = line.replace('\\graphicspath{', '\\graphicspath{{' + settings['outputdir'] +'/}')
-            break
+        if '{pythontex}' in line:
+            startline = n
+            while '\\usepackage' not in texout[startline] and startline >= 0:
+                startline -= 1
+            if startline == n:
+                if bool(search(r'\\usepackage(?:\[.*?\]){0,1}\{pythontex\}', line)):
+                    texout[n] = sub(r'\\usepackage(?:\[.*?\]){0,1}\{pythontex\}', '', line)
+                    if texout[n].isspace():
+                        texout[n] = ''
+                    break
+            else:
+                content = ''.join(texout[startline:n+1])
+                if bool(search(r'(?s)\\usepackage(?:\[.*?\]\s*){0,1}\{pythontex\}', content)):
+                    replacement = sub(r'(?s)\\usepackage(?:\[.*?\]\s*){0,1}\{pythontex\}', '', content)
+                    if replacement.isspace():
+                        replacement = ''
+                    texout[startline] = replacement
+                    for l in range(startline+1, n+1):
+                        texout[l] = ''
+                    break
         elif line.startswith(r'\begin{document}'):
-            texout[n] = '\\graphicspath{{' + settings['outputdir'] + '/}}\n' + line
             break
+    if preamble_additions:
+        texout[n] += '\n'.join(preamble_additions) + '\n'
+    # Take care of graphicspath
+    if args.graphicspath and settings['graphicx']:
+        for n, line in enumerate(texout):
+            if '\\graphicspath' in line and not bool(match('\s*%', line)):
+                texout[n] = line.replace('\\graphicspath{', '\\graphicspath{{' + settings['outputdir'] +'/}')
+                break
+            elif line.startswith(r'\begin{document}'):
+                texout[n] = '\\graphicspath{{' + settings['outputdir'] + '/}}\n' + line
+                break
 
 
 
 
-# Print any final messages
-if forced_double_space_list:
-    print('* DePythonTeX warning:')
-    print('    A trailing double space was forced with "\\space{}" for the following')
-    print('    This can happen when printed content is included inline')
-    print('    The forced double space is only an issue if it is not intentional')
-    for name, linenum in forced_double_space_list:
-        print('      "' + name + '" near line ' + str(linenum))
+    # Print any final messages
+    if forced_double_space_list:
+        print('* DePythonTeX warning:')
+        print('    A trailing double space was forced with "\\space{}" for the following')
+        print('    This can happen when printed content is included inline')
+        print('    The forced double space is only an issue if it is not intentional')
+        for name, linenum in forced_double_space_list:
+            print('      "' + name + '" near line ' + str(linenum))
 
 
 
 
-# Write output
-if args.output is not None:
-    for line in texout:
-        outfile.write(line)
-    outfile.close()
-else:
-    if sys.version_info[0] == 2:
-        sys.stdout = codecs.getwriter(encoding)(sys.stdout, 'strict')
-        sys.stderr = codecs.getwriter(encoding)(sys.stderr, 'strict')
+    # Write output
+    if args.output is not None:
+        for line in texout:
+            outfile.write(line)
+        outfile.close()
     else:
-        sys.stdout = codecs.getwriter(encoding)(sys.stdout.buffer, 'strict')
-        sys.stderr = codecs.getwriter(encoding)(sys.stderr.buffer, 'strict')
-    for line in texout:
-        sys.stdout.write(line)
+        if sys.version_info[0] == 2:
+            sys.stdout = codecs.getwriter(encoding)(sys.stdout, 'strict')
+            sys.stderr = codecs.getwriter(encoding)(sys.stderr, 'strict')
+        else:
+            sys.stdout = codecs.getwriter(encoding)(sys.stdout.buffer, 'strict')
+            sys.stderr = codecs.getwriter(encoding)(sys.stderr.buffer, 'strict')
+        for line in texout:
+            sys.stdout.write(line)
+
+
+if __name__ == '__main__':
+    main()

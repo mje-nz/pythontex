@@ -126,7 +126,7 @@ class Pytxcode(object):
 
 
 
-def process_argv(data, temp_data):
+def process_argv(argv, data, temp_data):
     '''
     Process command line options using the argparse module.
 
@@ -169,7 +169,7 @@ def process_argv(data, temp_data):
                              const='default',
                              metavar='<family>:<session>:<restart>',
                              help='Run the specified session (or default session) in interactive mode.  If there is only one session, it need not be specified.  If the session name is unambiguous, it is sufficient.  The full <family>:<session>:<restart> (for example, py:default:default) is only needed when the session name alone would be ambiguous.')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     # Store the parsed argv in data and temp_data
     data['encoding'] = args.encoding
@@ -2694,7 +2694,7 @@ def python_console(jobname, encoding, outputdir, workingdir, fvextfile,
 
 
 
-def main():
+def main(argv=None):
     # Create dictionaries for storing data.
     #
     # All data that must be saved for subsequent runs is stored in "data".
@@ -2715,7 +2715,7 @@ def main():
     #
     # This gets the raw_jobname (actual job name), jobname (a sanitized job
     # name, used for creating files named after the jobname), and any options.
-    process_argv(data, temp_data)
+    process_argv(argv, data, temp_data)
     # If there aren't errors in argv, and the program is going to run
     # (rather than just exit due to --version or --help command-line options),
     # print PythonTeX version.  Flush to make the message go out immediately,
@@ -2803,8 +2803,6 @@ def main():
     # Exit with appropriate exit code based on user settings.
     if temp_data['error_exit_code'] and temp_data['errors'] > 0:
         sys.exit(1)
-    else:
-        sys.exit()
 
 
 
